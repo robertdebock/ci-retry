@@ -1,0 +1,79 @@
+#!/usr/bin/env ansible-playbook
+---
+
+- name: Retry failed CI jobs on GitHub
+  hosts: localhost
+  become: no
+  gather_facts: no
+
+  tasks:
+    - name: Check if github_repo is set
+      ansible.builtin.fail:
+        msg: "github_repo is not set."
+      when:
+        - github_repo is not defined
+
+    - name: Check if github_token is set
+      ansible.builtin.fail:
+        msg: "github_token is not set."
+      when:
+        - github_token is not defined
+
+    - name: Get the authenticated user
+      ansible.builtin.uri:
+        url: "https://api.github.com/user"
+        return_content: yes
+        headers:
+          Authorization: "Bearer {{ github_token }}"
+          X-GitHub-Api-Version: "2022-11-28"
+          Accept: "application/vnd.github+json"
+      register: github_user
+
+    - name: List commits
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ github_user.json.login }}/{{ github_repo }}/commits/master"
+        return_content: yes
+        headers:
+          Authorization: "Bearer {{ github_token }}"
+          X-GitHub-Api-Version: "2022-11-28"
+          Accept: "application/vnd.github+json"
+      register: github_commit_list
+
+    - name: List workflow runs for a repository
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ github_user.json.login }}/{{ github_repo }}/actions/runs"
+        return_content: yes
+        headers:
+          Authorization: "Bearer {{ github_token }}"
+          X-GitHub-Api-Version: "2022-11-28"
+          Accept: "application/vnd.github+json"
+        body:
+          head_sha: "{{ github_commit_list.json.sha }}"
+        body_format: json
+      register: github_workflow_runs
+
+    - name: Store job id of job that failed
+      ansible.builtin.set_fact:
+        github_job_id: "{{ item.id }}"
+      loop:
+        - "{{ github_workflow_runs.json.workflow_runs[:3] | selectattr('name', 'match', 'Ansible Molecule') | first }}"
+      loop_control:
+        label: "{{ item.id }}"
+      when: item.conclusion == "failure"
+
+    - name: Re-run failed jobs from a workflow run
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ github_user.json.login }}/{{ github_repo }}/actions/runs/{{ github_job_id }}/rerun-failed-jobs"
+        method: POST
+        return_content: yes
+        headers:
+          Authorization: "Bearer {{ github_token }}"
+          X-GitHub-Api-Version: "2022-11-28"
+          Accept: "application/vnd.github+json"
+        status_code:
+          - 201
+      register: github_rerun_failed_jobs
+      when:
+        - github_job_id is defined
+      changed_when:
+        - github_rerun_failed_jobs.status == 201

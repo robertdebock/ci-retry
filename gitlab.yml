@@ -1,0 +1,68 @@
+#!/usr/bin/env ansible-playbook
+---
+
+- name: Retry failed CI jobs on GitHub
+  hosts: localhost
+  become: no
+  gather_facts: no
+
+  tasks:
+    - name: Check if gitlab_project is set
+      ansible.builtin.fail:
+        msg: "gitlab_project is not set."
+      when:
+        - gitlab_project is not defined
+
+    - name: Check if gitlab_token is set
+      ansible.builtin.fail:
+        msg: "gitlab_token is not set."
+      when:
+        - gitlab_token is not defined
+
+    - name: List all projects
+      ansible.builtin.uri:
+        url: "https://gitlab.com/api/v4/projects"
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_token }}"
+        return_content: yes
+        body_format: form-urlencoded
+        body:
+          owned: "true"
+          search: "{{ gitlab_project }}"
+      register: gitlab_projects
+
+    - name: Store project id
+      ansible.builtin.set_fact:
+        gitlab_project_id: "{{ item.id }}"
+      loop:
+        - "{{ gitlab_projects.json | first }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: List project pipelines
+      ansible.builtin.uri:
+        url: "https://gitlab.com/api/v4/projects/{{ gitlab_project_id }}/pipelines"
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_token }}"
+        return_content: yes
+      register: gitlab_pipelines
+
+    - name: List pipeline jobs
+      ansible.builtin.uri:
+        url: "https://gitlab.com/api/v4/projects/{{ gitlab_project_id }}/pipelines/{{ item.id }}/jobs"
+        headers:
+          PRIVATE-TOKEN: "{{ gitlab_token }}"
+        return_content: yes
+      register: gitlab_pipeline_jobs
+      loop:
+        - "{{ gitlab_pipelines.json | first }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: Include gitlab_job.yml
+      ansible.builtin.include_tasks:
+        file: gitlab_job.yml
+      loop: "{{ gitlab_pipeline_jobs.results }}"
+      loop_control:
+        loop_var: gitlab_job
+        label: "{{ gitlab_job.item.id }}"
