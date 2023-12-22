@@ -1,6 +1,6 @@
 ---
 
-- name: Retry a job
+- name: gitlab_job | Retry a job
   ansible.builtin.uri:
     url: "https://gitlab.com/api/v4/projects/{{ gitlab_project_id }}/jobs/{{ item.id }}/retry"
     method: POST
