@@ -1,7 +1,7 @@
 #!/usr/bin/env ansible-playbook
 ---
 
-- name: gitlab | Retry failed CI jobs on GitHub
+- name: gitlab | Retry failed CI jobs on GitLab
   hosts: localhost
   become: no
   gather_facts: no
